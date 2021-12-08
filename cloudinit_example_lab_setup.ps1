@@ -37,33 +37,37 @@ $SGId = (aws ec2 create-security-group --group-name LAB_SG --description LAB_SG 
 Write-Host "security-group-id $SGId"
 aws ec2 authorize-security-group-ingress --group-id $SGId --protocol tcp --port 22 --cidr 0.0.0.0/0
 
-# queue
-$QueueUrl = (aws sqs create-queue --queue-name labq | ConvertFrom-Json).QueueUrl
-(Get-Content -path qprocessor_template.service -Raw) -replace '__QUEUE__',$QueueUrl | Out-File qprocessor.service -Encoding Ascii 
+# create the queue
+$QueueUrl = ( aws sqs create-queue --queue-name labq | ConvertFrom-Json ).QueueUrl
+Write-Host "queue url $QueueUrl"
 
-# s3 bucket
-aws s3 mb s3://peadar-cloudinit-lab
-aws s3 cp qprocessor.py s3://peadar-cloudinit-lab
-aws s3 cp qprocessor.service s3://peadar-cloudinit-lab
+# create the service unit file by replacing text
+(Get-Content qprocessor_template.service -Raw) -replace '__QUEUE__',$QueueUrl | Out-File qprocessor.service -Encoding Ascii
 
-# get the instance ID
+# S3 bucket
+$BucketName='pg-cloudinit-lab'
+aws s3 mb s3://$BucketName
+aws s3 cp qprocessor.py s3://$BucketName/qprocessor.py
+aws s3 cp qprocessor.service s3://$BucketName/qprocessor.service
+
+# create the user data script
+(Get-Content user_data_template.sh -Raw) -replace '__BUCKET__',$BucketName | Out-File user_data.sh -Encoding Ascii
+
+# run instance
 $InstanceId = (aws ec2 run-instances --instance-type t2.nano --subnet-id $Subnet.SubnetId --key-name vockey --security-group-ids $SGId --image-id resolve:ssm:/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2 --iam-instance-profile Name=LabInstanceProfile --user-data file://user_data.sh | ConvertFrom-Json).Instances[0].InstanceId
-Write-Host "Instance ID: $InstanceId"
+Write-Host "instance $InstanceId"
 
-# get the public IP
-$Instance = (aws ec2 describe-instances --instance-id $InstanceId | ConvertFrom-Json).Reservations.Instances[0]
-$PublicIp = $Instance.PublicIpAddress
-Write-Host "IP address: $PublicIp"
-
-
+# public IP
+$PublicIpAddress = (aws ec2 describe-instances --instance-id $InstanceId | ConvertFrom-Json).Reservations[0].Instances[0].PublicIpAddress
+Write-Host "public IP $PublicIpAddress"
 
 # set global scope (variables push back up to PowerShell session)
-Write-Host '$VpcId, $SubnetId, $RTId, $SGId, $IGWId are in PowerShell session'
+Write-Host '$VpcId, $SubnetId, $RTId, $SGId, $IGWId, $InstanceId, $PublicIpAddress are in PowerShell session'
 $global:VpcId=$Vpc.VpcId
 $global:SubnetId=$Subnet.SubnetId
 $global:RTId=$RT.RouteTableId
 $global:SGId=$SGId
 $global:IGWId=$IGW.InternetGatewayId
 $global:InstanceId=$InstanceId
-$global:PublicIp=$PublicIp
+$global:PublicIpAddress=$PublicIpAddress
 
